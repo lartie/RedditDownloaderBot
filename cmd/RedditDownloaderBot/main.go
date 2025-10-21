@@ -6,12 +6,13 @@ import (
 	"RedditDownloaderBot/pkg/common"
 	"RedditDownloaderBot/pkg/reddit"
 	"RedditDownloaderBot/pkg/util"
-	"github.com/go-faster/errors"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-faster/errors"
 )
 
 func main() {

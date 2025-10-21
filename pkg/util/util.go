@@ -3,7 +3,6 @@ package util
 import (
 	"encoding/base64"
 	"encoding/json"
-	"github.com/google/uuid"
 	"log"
 	"net/url"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"unsafe"
+
+	"github.com/google/uuid"
 )
 
 // IsUrl checks if a string is an url

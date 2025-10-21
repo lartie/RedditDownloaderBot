@@ -6,9 +6,9 @@ services:
     depends_on:
       - redis
     environment:
-      CLIENT_ID: "Reddit client ID"
-      CLIENT_SECRET: "Reddit client secret"
-      BOT_TOKEN: "Telegram bot token"
+      CLIENT_ID: "jXp8_HKTov2Q1t3ev8FKYw"
+      CLIENT_SECRET: "dJ-uzuKXcumSVnftexmkS0HBLaDozQ"
+      BOT_TOKEN: "6491093673:AAHYFjlfJ5eR83S5SVGLTv4oIaY29c3bIus"
       REDIS_HOST: redis
       REDIS_PORT: 6379
 

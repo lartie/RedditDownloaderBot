@@ -7,16 +7,176 @@ import (
 	"RedditDownloaderBot/pkg/util"
 	"encoding/json"
 	"errors"
-	"github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 
 	"github.com/google/uuid"
 )
+
+// ----- Settings (in-memory) -----
+
+type DownloadMode int
+
+const (
+	DownloadModeAsk DownloadMode = iota
+	DownloadModeMedia
+	DownloadModeFiles
+)
+
+const (
+	KindSettings = "s"
+
+	ActionSetLang  = "sl"
+	ActionOpenLang = "ol"
+	ActionOpenMode = "om"
+	ActionSetMode  = "sm"
+	ActionOpenRoot = "or"
+)
+
+func (m DownloadMode) String() string {
+	switch m {
+	case DownloadModeMedia:
+		return "media"
+	case DownloadModeFiles:
+		return "files"
+	default:
+		return "ask"
+	}
+}
+
+func parseDownloadMode(s string) DownloadMode {
+	switch strings.ToLower(s) {
+	case "media":
+		return DownloadModeMedia
+	case "files":
+		return DownloadModeFiles
+	default:
+		return DownloadModeAsk
+	}
+}
+
+// user preferences stored in RAM
+var userPrefs = struct {
+	mu    sync.RWMutex
+	byUID map[int64]DownloadMode
+}{
+	byUID: make(map[int64]DownloadMode),
+}
+
+func getUserMode(userID int64) DownloadMode {
+	userPrefs.mu.RLock()
+	m, ok := userPrefs.byUID[userID]
+	userPrefs.mu.RUnlock()
+	if !ok {
+		return DownloadModeAsk
+	}
+	return m
+}
+
+func setUserMode(userID int64, m DownloadMode) {
+	userPrefs.mu.Lock()
+	userPrefs.byUID[userID] = m
+	userPrefs.mu.Unlock()
+}
+
+// UI builders
+func settingsRootKeyboardFor(uid int64) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         t(uid, "settings.choose_mode"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenMode, "").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.language"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenLang, "").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.back"),
+					CallbackData: NewSettingsCallbackData(KindSettings, "back", "").String(),
+				},
+			},
+		},
+	}
+}
+
+func settingsModeKeyboard(uid int64, current DownloadMode) gotgbot.InlineKeyboardMarkup {
+	mark := func(label string, active bool) string {
+		if active {
+			return "• " + label + " ✅"
+		}
+		return label
+	}
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         mark(t(uid, "mode.media"), current == DownloadModeMedia),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetMode, "media").String(),
+				},
+				{
+					Text:         mark(t(uid, "mode.files"), current == DownloadModeFiles),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetMode, "files").String(),
+				},
+			},
+			{
+				{
+					Text:         mark(t(uid, "mode.ask"), current == DownloadModeAsk),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetMode, "ask").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.back"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenRoot, "").String(),
+				},
+			},
+		},
+	}
+}
+
+func settingsLangKeyboard(uid int64) gotgbot.InlineKeyboardMarkup {
+	cur := getUserLang(uid)
+	mark := func(code string, label string) string {
+		if string(cur) == code {
+			return "• " + label + " ✅"
+		}
+		return label
+	}
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         mark("en", "English"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLang, "en").String(),
+				},
+				{
+					Text:         mark("ru", "Русский"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLang, "ru").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.back"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLang, "").String(),
+				},
+			},
+		},
+	}
+}
 
 // RunBot runs the bot with the specified token
 func (c *Client) RunBot(token string, allowedUsers AllowedUsers) {
@@ -69,20 +229,31 @@ func (c *Client) RunBot(token string, allowedUsers AllowedUsers) {
 func (c *Client) handleMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	// Only text messages are allowed
 	if ctx.Message.Text == "" {
-		_, err := ctx.EffectiveChat.SendMessage(bot, "Please send a Reddit post.", nil)
+		_, err := ctx.EffectiveChat.SendMessage(bot, t(ctx.Message.From.Id, "msg.request_post"), nil)
 		return err
 	}
 	// Check if the message is command. I don't use command handler because I'll lose
 	// the userID control.
 	switch ctx.Message.Text {
 	case "/start":
-		_, err := ctx.EffectiveChat.SendMessage(bot, "Hey!\n\nJust send me a post or comment, and I’ll download it for you.", nil)
+		_, err := ctx.EffectiveChat.SendMessage(bot, tr(getUserLang(ctx.Message.From.Id), "cmd.start"), nil)
 		return err
 	case "/about":
-		_, err := ctx.EffectiveChat.SendMessage(bot, "Reddit Downloader Bot v"+common.Version+"\nBy Hirbod Behnam\nSource: https://github.com/HirbodBehnam/RedditDownloaderBot", nil)
+		_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(getUserLang(ctx.Message.From.Id), "cmd.about"), common.Version), nil)
 		return err
 	case "/help":
-		_, err := ctx.EffectiveChat.SendMessage(bot, "You can send me Reddit posts or comments. If it’s text only, I’ll send a text message. If it’s an image or video, I’ll upload and send the content along with the title and link.", nil)
+		_, err := ctx.EffectiveChat.SendMessage(bot, tr(getUserLang(ctx.Message.From.Id), "cmd.help"), nil)
+		return err
+	case "/settings":
+		uid := ctx.Message.From.Id
+		mode := getUserMode(uid)
+		title := tr(getUserLang(uid), "settings.title")
+		current := tr(getUserLang(uid), "settings.current_mode")
+		text := title + "\n\n" + fmt.Sprintf(current, mode.String())
+		_, err := ctx.EffectiveChat.SendMessage(bot, text, &gotgbot.SendMessageOpts{
+			ParseMode:   gotgbot.ParseModeMarkdownV2,
+			ReplyMarkup: settingsRootKeyboardFor(uid),
+		})
 		return err
 	default:
 		return c.fetchPostDetailsAndSend(bot, ctx)
@@ -111,7 +282,7 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		toSendText = addLinkIfNeeded(data.Text, realPostUrl)
 	case reddit.FetchResultMedia:
 		if len(data.Medias) == 0 {
-			toSendText = "No media found."
+			toSendText = t(ctx.Message.From.Id, "msg.no_media_found")
 			break
 		}
 		// If there is one media quality, download it
@@ -131,7 +302,7 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 			}
 		}
 		// Allow the user to select quality
-		toSendText = "Please select the quality."
+		toSendText = t(ctx.Message.From.Id, "msg.select_quality")
 		idString := util.UUIDToBase64(uuid.New())
 		audioIndex, _ := data.HasAudio()
 		switch data.Type {
@@ -157,6 +328,14 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 			log.Println("Cannot set the media cache in database:", err)
 		}
 	case reddit.FetchResultAlbum:
+		// auto-apply user preference if not "ask"
+		uid := ctx.Message.From.Id
+		switch getUserMode(uid) {
+		case DownloadModeMedia:
+			return c.handleAlbumUpload(bot, data, realPostUrl, ctx.EffectiveChat.Id, false)
+		case DownloadModeFiles:
+			return c.handleAlbumUpload(bot, data, realPostUrl, ctx.EffectiveChat.Id, true)
+		}
 		idString := util.UUIDToBase64(uuid.New())
 		err := c.CallbackCache.SetAlbumCache(idString, cache.CallbackAlbumCached{
 			PostLink: realPostUrl,
@@ -165,18 +344,19 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		if err != nil {
 			log.Println("Cannot set the album cache in database:", err)
 		}
-		toSendText = "Download album as media or file?"
+		toSendText = t(ctx.Message.From.Id, "album.ask")
+		uid = ctx.Message.From.Id
 		toSendOpt.ReplyMarkup = gotgbot.InlineKeyboardMarkup{
 			InlineKeyboard: [][]gotgbot.InlineKeyboardButton{{
 				gotgbot.InlineKeyboardButton{
-					Text: "Media",
+					Text: t(uid, "album.button.media"),
 					CallbackData: CallbackButtonData{
 						ID:   idString,
 						Mode: CallbackButtonDataModePhoto,
 					}.String(),
 				},
 				gotgbot.InlineKeyboardButton{
-					Text: "File",
+					Text: t(uid, "album.button.file"),
 					CallbackData: CallbackButtonData{
 						ID:   idString,
 						Mode: CallbackButtonDataModeFile,
@@ -186,7 +366,7 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		}
 	default:
 		log.Printf("unknown type: %T\n", result)
-		toSendText = "Unknown type (Please report this on the main GitHub project.)"
+		toSendText = tr(getUserLang(ctx.Message.From.Id), "unknown.type")
 	}
 	// Check the toSendText size
 	if len(toSendText) > 4096 {
@@ -215,17 +395,63 @@ func (c *Client) handleCallback(bot *gotgbot.Bot, ctx *ext.Context) error {
 	// Don't crash!
 	defer func() {
 		if r := recover(); r != nil {
-			_, _ = ctx.EffectiveChat.SendMessage(bot, "Cannot get data. (panic)", nil)
+			_, _ = ctx.EffectiveChat.SendMessage(bot, t(ctx.CallbackQuery.From.Id, "err.panic"), nil)
 			log.Println("Recovering from panic:", r)
 		}
 	}()
 	// Delete the message
 	_, _ = bot.DeleteMessage(ctx.EffectiveChat.Id, ctx.EffectiveMessage.GetMessageId(), nil)
+	// Settings callbacks (identified by kind == "settings")
+	var scd settingsCallbackData
+	if err := json.Unmarshal([]byte(ctx.CallbackQuery.Data), &scd); err == nil && scd.Kind == KindSettings {
+		uid := ctx.CallbackQuery.From.Id
+		switch scd.Action {
+		case ActionOpenMode:
+			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.mode.caption"), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsModeKeyboard(uid, getUserMode(uid)),
+			})
+			return err
+		case ActionOpenRoot, "back":
+			text := tr(getUserLang(uid), "settings.title")
+			_, err := ctx.EffectiveChat.SendMessage(bot, text, &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsRootKeyboardFor(uid),
+			})
+			return err
+		case ActionSetMode:
+			m := parseDownloadMode(scd.Value)
+			setUserMode(uid, m)
+			_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(getUserLang(uid), "settings.mode.saved"), parseDownloadMode(scd.Value).String()), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsModeKeyboard(uid, m),
+			})
+			return err
+		case ActionOpenLang:
+			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.language.caption"), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsLangKeyboard(uid),
+			})
+			return err
+		case ActionSetLang:
+			switch strings.ToLower(scd.Value) {
+			case "ru":
+				setUserLang(uid, LangRU)
+			default:
+				setUserLang(uid, LangEN)
+			}
+			cur := getUserLang(uid)
+			_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(cur, "settings.language.saved"), strings.ToUpper(string(cur))), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsLangKeyboard(uid),
+			})
+			return err
+		default:
+			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.unknown_action"), nil)
+			return err
+		}
+	}
 	// Parse the data
 	var data CallbackButtonData
 	err := json.Unmarshal([]byte(ctx.CallbackQuery.Data), &data)
 	if err != nil {
-		_, err = ctx.EffectiveChat.SendMessage(bot, "Broken callback data", nil)
+		uid := ctx.CallbackQuery.From.Id
+		_, err = ctx.EffectiveChat.SendMessage(bot, t(uid, "err.broken_callback"), nil)
 		return err
 	}
 	// Get the cache from database
@@ -238,21 +464,24 @@ func (c *Client) handleCallback(bot *gotgbot.Bot, ctx *ext.Context) error {
 			return c.handleAlbumUpload(bot, album.Album, album.PostLink, ctx.EffectiveChat.Id, data.Mode == CallbackButtonDataModeFile)
 		} else if errors.Is(err, cache.NotFoundErr) {
 			// It does not exist...
-			_, err = ctx.EffectiveChat.SendMessage(bot, "Please resend the link.", nil)
+			uid := ctx.CallbackQuery.From.Id
+			_, err = ctx.EffectiveChat.SendMessage(bot, t(uid, "err.resend_link"), nil)
 			return err
 		}
 		// Fall to report internal error
 	}
 	// Check other errors
 	if err != nil {
+		uid := ctx.CallbackQuery.From.Id
 		log.Println("Cannot get Callback ID from database:", err)
-		_, err = ctx.EffectiveChat.SendMessage(bot, "Internal error", nil)
+		_, err = ctx.EffectiveChat.SendMessage(bot, t(uid, "err.internal"), nil)
 		return err
 	}
 	// Check the link
 	link, exists := cachedData.Links[data.LinkKey]
 	if !exists {
-		_, err = ctx.EffectiveChat.SendMessage(bot, "Please resend the link.", nil)
+		uid := ctx.CallbackQuery.From.Id
+		_, err = ctx.EffectiveChat.SendMessage(bot, t(uid, "err.resend_link"), nil)
 		return err
 	}
 	dim := reddit.Dimension{
@@ -275,4 +504,23 @@ func (c *Client) handleCallback(bot *gotgbot.Bot, ctx *ext.Context) error {
 	}
 	// What
 	panic("Unknown media type: " + strconv.Itoa(int(cachedData.Type)))
+}
+
+type settingsCallbackData struct {
+	Kind   string `json:"k"`
+	Action string `json:"a"`
+	Value  string `json:"v"`
+}
+
+func (s *settingsCallbackData) String() string {
+	data, _ := json.Marshal(s)
+	return string(data)
+}
+
+func NewSettingsCallbackData(kind string, action string, value string) *settingsCallbackData {
+	return &settingsCallbackData{
+		Kind:   kind,
+		Action: action,
+		Value:  value,
+	}
 }

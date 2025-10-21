@@ -3,13 +3,14 @@ package reddit
 import (
 	"RedditDownloaderBot/pkg/common"
 	"encoding/xml"
-	"github.com/go-faster/errors"
 	"io"
 	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/go-faster/errors"
 )
 
 // numberRegex will only match numbers in a string

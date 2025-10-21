@@ -4,7 +4,6 @@ import (
 	"RedditDownloaderBot/pkg/common"
 	"RedditDownloaderBot/pkg/util"
 	"encoding/json"
-	"github.com/go-faster/errors"
 	"io"
 	"log"
 	"net/http"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/go-faster/errors"
 )
 
 // userAgent of requests

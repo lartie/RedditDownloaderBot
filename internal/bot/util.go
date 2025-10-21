@@ -4,10 +4,11 @@ import (
 	"RedditDownloaderBot/internal/cache"
 	"RedditDownloaderBot/pkg/reddit"
 	"RedditDownloaderBot/pkg/util"
-	"github.com/PaulSonOfLars/gotgbot/v2"
 	"io"
 	"os"
 	"strings"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
 )
 
 // If this value is false, we will not add the link of the post to each message caption.

@@ -4,13 +4,14 @@ import (
 	"RedditDownloaderBot/pkg/common"
 	"RedditDownloaderBot/pkg/util"
 	"fmt"
-	"github.com/PuerkitoBio/goquery"
 	"html"
 	"log"
 	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // If this variable is true, it means that we don't allow nsfw posts to be downloaded

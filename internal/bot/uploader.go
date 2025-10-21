@@ -3,11 +3,12 @@ package bot
 import (
 	"RedditDownloaderBot/pkg/reddit"
 	"RedditDownloaderBot/pkg/util"
-	"github.com/PaulSonOfLars/gotgbot/v2"
 	"log"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/PaulSonOfLars/gotgbot/v2"
 
 	"github.com/go-faster/errors"
 )

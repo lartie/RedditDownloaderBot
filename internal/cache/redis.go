@@ -4,10 +4,11 @@ import (
 	"RedditDownloaderBot/pkg/util"
 	"context"
 	"encoding/json"
-	"github.com/go-faster/errors"
-	"github.com/redis/go-redis/v9"
 	"strings"
 	"time"
+
+	"github.com/go-faster/errors"
+	"github.com/redis/go-redis/v9"
 )
 
 var _ Interface = RedisCache{}

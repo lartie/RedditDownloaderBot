@@ -3,12 +3,13 @@ package reddit
 import (
 	"RedditDownloaderBot/pkg/util"
 	"bytes"
-	"github.com/go-faster/errors"
 	"log"
 	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
+
+	"github.com/go-faster/errors"
 )
 
 // We don't download anything more than this size
