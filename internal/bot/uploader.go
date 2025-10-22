@@ -1,8 +1,8 @@
 package bot
 
 import (
-	"RedditDownloaderBot/pkg/reddit"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/reddit"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"log"
 	"os"
 	"strings"

@@ -1,6 +1,6 @@
 package bot
 
-import "RedditDownloaderBot/pkg/reddit"
+import "github.com/lartie/RedditDownloaderBot/pkg/reddit"
 
 const regularMaxUploadSize = 50 * 1000 * 1000 // these must be 1000 not 1024
 const photoMaxUploadSize = 10 * 1000 * 1000

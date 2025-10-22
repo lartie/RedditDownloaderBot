@@ -1,7 +1,7 @@
 package reddit
 
 import (
-	"RedditDownloaderBot/pkg/common"
+	"github.com/lartie/RedditDownloaderBot/pkg/common"
 	"encoding/xml"
 	"io"
 	"net/http"

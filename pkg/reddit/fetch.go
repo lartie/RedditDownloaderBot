@@ -1,8 +1,8 @@
 package reddit
 
 import (
-	"RedditDownloaderBot/pkg/common"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/common"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"fmt"
 	"html"
 	"log"
@@ -416,7 +416,7 @@ func getPost(postUrl string, root map[string]interface{}) (fetchResult interface
 				BotError:    "This type of post is not supported: " + hint.(string),
 			}
 		}
-	} else { // text or gallery
+	} else {                                       // text or gallery
 		if gData, ok := root["gallery_data"]; ok { // gallery
 			if data, ok := root["media_metadata"]; ok {
 				return FetchResultAlbum{

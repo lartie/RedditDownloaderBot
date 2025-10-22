@@ -1,9 +1,9 @@
 package bot
 
 import (
-	"RedditDownloaderBot/internal/cache"
-	"RedditDownloaderBot/pkg/reddit"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/internal/cache"
+	"github.com/lartie/RedditDownloaderBot/pkg/reddit"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"encoding/json"
 	"errors"
 	"fmt"

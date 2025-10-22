@@ -1,4 +1,4 @@
-module RedditDownloaderBot
+module github.com/lartie/RedditDownloaderBot
 
 go 1.23.0
 

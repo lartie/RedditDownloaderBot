@@ -1,8 +1,8 @@
 package reddit
 
 import (
-	"RedditDownloaderBot/pkg/common"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/common"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"encoding/json"
 	"io"
 	"log"
@@ -18,7 +18,7 @@ import (
 )
 
 // userAgent of requests
-const userAgent = "TelegramBot:Reddit-Downloader-Bot:" + common.Version + " (by /u/HirbodBehnam)"
+const userAgent = "TelegramBot:Reddit-Downloader-Bot:" + common.Version + " (by https://t.me/lartie)"
 
 // postApiPoint is the endpoint format which we should get info about posts
 const postApiPoint = "https://api.reddit.com/api/info/?id=t3_"

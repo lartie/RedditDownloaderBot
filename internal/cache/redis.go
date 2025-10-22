@@ -1,7 +1,7 @@
 package cache
 
 import (
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"context"
 	"encoding/json"
 	"strings"

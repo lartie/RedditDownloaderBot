@@ -1,7 +1,7 @@
 package bot
 
 import (
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 )
 
 // CallbackButtonData is the data which is sent to us after user clicks on an inline button

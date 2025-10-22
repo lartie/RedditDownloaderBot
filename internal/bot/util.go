@@ -1,9 +1,9 @@
 package bot
 
 import (
-	"RedditDownloaderBot/internal/cache"
-	"RedditDownloaderBot/pkg/reddit"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/internal/cache"
+	"github.com/lartie/RedditDownloaderBot/pkg/reddit"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"io"
 	"os"
 	"strings"
@@ -87,6 +87,10 @@ func createVideoInlineKeyboard(id string, medias reddit.FetchResultMedia) gotgbo
 
 // Adds the link of the post to a text if needed (the INCLUDE_LINK is set)
 func addLinkIfNeeded(text, link string) string {
+	if link == "" {
+		return text
+	}
+
 	if disableIncludeLinkInCaption {
 		return text
 	}

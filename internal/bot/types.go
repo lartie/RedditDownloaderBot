@@ -1,8 +1,8 @@
 package bot
 
 import (
-	"RedditDownloaderBot/internal/cache"
-	"RedditDownloaderBot/pkg/reddit"
+	"github.com/lartie/RedditDownloaderBot/internal/cache"
+	"github.com/lartie/RedditDownloaderBot/pkg/reddit"
 )
 
 // Client is the contains the data needed to operate the bot

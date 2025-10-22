@@ -1,6 +1,6 @@
 package cache
 
-import "RedditDownloaderBot/pkg/reddit"
+import "github.com/lartie/RedditDownloaderBot/pkg/reddit"
 
 // CallbackDataCached is the data we store associated with an ID which is CallbackButtonData.ID
 // We store this type in mediaCache

@@ -1,11 +1,11 @@
 package main
 
 import (
-	"RedditDownloaderBot/internal/bot"
-	"RedditDownloaderBot/internal/cache"
-	"RedditDownloaderBot/pkg/common"
-	"RedditDownloaderBot/pkg/reddit"
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/internal/bot"
+	"github.com/lartie/RedditDownloaderBot/internal/cache"
+	"github.com/lartie/RedditDownloaderBot/pkg/common"
+	"github.com/lartie/RedditDownloaderBot/pkg/reddit"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"log"
 	"os"
 	"strconv"

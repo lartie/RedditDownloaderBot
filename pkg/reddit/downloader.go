@@ -1,7 +1,7 @@
 package reddit
 
 import (
-	"RedditDownloaderBot/pkg/util"
+	"github.com/lartie/RedditDownloaderBot/pkg/util"
 	"bytes"
 	"log"
 	"net/url"
