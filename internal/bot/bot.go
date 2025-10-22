@@ -2,13 +2,13 @@ package bot
 
 import (
 	"RedditDownloaderBot/internal/cache"
-	"RedditDownloaderBot/pkg/common"
 	"RedditDownloaderBot/pkg/reddit"
 	"RedditDownloaderBot/pkg/util"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +31,66 @@ const (
 	DownloadModeFiles
 )
 
+// ----- Media quality (in-memory)
+
+type MediaQuality int
+
+const (
+	QualityAsk MediaQuality = iota
+	QualityOriginal
+	QualityHigh
+	QualityLow
+)
+
+func (q MediaQuality) String() string {
+	switch q {
+	case QualityOriginal:
+		return "original"
+	case QualityHigh:
+		return "high"
+	case QualityLow:
+		return "low"
+	default:
+		return "ask"
+	}
+}
+
+func parseMediaQuality(s string) MediaQuality {
+	switch strings.ToLower(s) {
+	case "original":
+		return QualityOriginal
+	case "high":
+		return QualityHigh
+	case "low":
+		return QualityLow
+	default:
+		return QualityAsk
+	}
+}
+
+var userQualityPrefs = struct {
+	mu    sync.RWMutex
+	byUID map[int64]MediaQuality
+}{
+	byUID: make(map[int64]MediaQuality),
+}
+
+func getUserQuality(userID int64) MediaQuality {
+	userQualityPrefs.mu.RLock()
+	q, ok := userQualityPrefs.byUID[userID]
+	userQualityPrefs.mu.RUnlock()
+	if !ok {
+		return QualityAsk
+	}
+	return q
+}
+
+func setUserQuality(userID int64, q MediaQuality) {
+	userQualityPrefs.mu.Lock()
+	userQualityPrefs.byUID[userID] = q
+	userQualityPrefs.mu.Unlock()
+}
+
 const (
 	KindSettings = "s"
 
@@ -39,7 +99,35 @@ const (
 	ActionOpenMode = "om"
 	ActionSetMode  = "sm"
 	ActionOpenRoot = "or"
+	ActionOpenQlt  = "oq"
+	ActionSetQlt   = "sq"
+	ActionOpenLink = "oln"
+	ActionSetLink  = "sln"
 )
+
+// attach original reddit link in captions/text
+var userAttachLinkPrefs = struct {
+	mu    sync.RWMutex
+	byUID map[int64]bool // true = attach, false = don't attach
+}{
+	byUID: make(map[int64]bool),
+}
+
+func getUserAttachLink(uid int64) bool {
+	userAttachLinkPrefs.mu.RLock()
+	v, ok := userAttachLinkPrefs.byUID[uid]
+	userAttachLinkPrefs.mu.RUnlock()
+	if !ok {
+		return true // default: keep existing behavior and attach
+	}
+	return v
+}
+
+func setUserAttachLink(uid int64, v bool) {
+	userAttachLinkPrefs.mu.Lock()
+	userAttachLinkPrefs.byUID[uid] = v
+	userAttachLinkPrefs.mu.Unlock()
+}
 
 func (m DownloadMode) String() string {
 	switch m {
@@ -89,24 +177,154 @@ func setUserMode(userID int64, m DownloadMode) {
 
 // UI builders
 func settingsRootKeyboardFor(uid int64) gotgbot.InlineKeyboardMarkup {
+	l := getUserLang(uid)
+	m := getUserMode(uid)
+	q := getUserQuality(uid)
+	attach := getUserAttachLink(uid)
+
+	// Build button labels with current values
+	langLabel := fmt.Sprintf("%s %s", tr(l, "settings.language.caption"), langHuman(l))
+
+	var modeValue string
+	switch m {
+	case DownloadModeAsk:
+		modeValue = t(uid, "mode.ask")
+	case DownloadModeMedia:
+		if l == LangRU {
+			modeValue = "Авто (" + t(uid, "mode.media") + ")"
+		} else {
+			modeValue = "Auto (" + t(uid, "mode.media") + ")"
+		}
+	case DownloadModeFiles:
+		if l == LangRU {
+			modeValue = "Авто (" + t(uid, "mode.files") + ")"
+		} else {
+			modeValue = "Auto (" + t(uid, "mode.files") + ")"
+		}
+	}
+	modeLabel := fmt.Sprintf("%s %s", tr(l, "settings.mode.caption"), modeValue)
+
+	var qltValue string
+	switch q {
+	case QualityOriginal:
+		qltValue = t(uid, "quality.original")
+	case QualityHigh:
+		qltValue = t(uid, "quality.high")
+	case QualityLow:
+		qltValue = t(uid, "quality.low")
+	default:
+		qltValue = t(uid, "quality.ask")
+	}
+	qltLabel := fmt.Sprintf("%s %s", tr(l, "settings.quality.caption"), qltValue)
+
+	var linkVal string
+	if attach {
+		linkVal = t(uid, "link.on")
+	} else {
+		linkVal = t(uid, "link.off")
+	}
+	linkLabel := fmt.Sprintf("%s %s", tr(l, "settings.link.caption"), linkVal)
+
 	return gotgbot.InlineKeyboardMarkup{
 		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
 			{
 				{
-					Text:         t(uid, "settings.choose_mode"),
+					Text:         langLabel,
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenLang, "").String(),
+				},
+			},
+			{
+				{
+					Text:         modeLabel,
 					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenMode, "").String(),
 				},
 			},
 			{
 				{
-					Text:         t(uid, "settings.language"),
-					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenLang, "").String(),
+					Text:         qltLabel,
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenQlt, "").String(),
+				},
+			},
+			{
+				{
+					Text:         linkLabel,
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenLink, "").String(),
 				},
 			},
 			{
 				{
 					Text:         t(uid, "settings.back"),
 					CallbackData: NewSettingsCallbackData(KindSettings, "back", "").String(),
+				},
+			},
+		},
+	}
+}
+func settingsLinkKeyboard(uid int64, attach bool) gotgbot.InlineKeyboardMarkup {
+	mark := func(label string, active bool) string {
+		if active {
+			return "• " + label + " ✅"
+		}
+		return label
+	}
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         mark(t(uid, "link.on"), attach == true),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLink, "on").String(),
+				},
+				{
+					Text:         mark(t(uid, "link.off"), attach == false),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLink, "off").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.back"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenRoot, "").String(),
+				},
+			},
+		},
+	}
+}
+func settingsQualityKeyboard(uid int64, current MediaQuality) gotgbot.InlineKeyboardMarkup {
+	mark := func(label string, active bool) string {
+		if active {
+			return "• " + label + " ✅"
+		}
+		return label
+	}
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         mark(t(uid, "quality.ask"), current == QualityAsk),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetQlt, "ask").String(),
+				},
+			},
+			{
+				{
+					Text:         mark(t(uid, "quality.original"), current == QualityOriginal),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetQlt, "original").String(),
+				},
+			},
+			{
+				{
+					Text:         mark(t(uid, "quality.high"), current == QualityHigh),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetQlt, "high").String(),
+				},
+			},
+			{
+				{
+					Text:         mark(t(uid, "quality.low"), current == QualityLow),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetQlt, "low").String(),
+				},
+			},
+			{
+				{
+					Text:         t(uid, "settings.back"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenRoot, "").String(),
 				},
 			},
 		},
@@ -171,7 +389,20 @@ func settingsLangKeyboard(uid int64) gotgbot.InlineKeyboardMarkup {
 			{
 				{
 					Text:         t(uid, "settings.back"),
-					CallbackData: NewSettingsCallbackData(KindSettings, ActionSetLang, "").String(),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenRoot, "").String(),
+				},
+			},
+		},
+	}
+}
+
+func startKeyboard(uid int64) gotgbot.InlineKeyboardMarkup {
+	return gotgbot.InlineKeyboardMarkup{
+		InlineKeyboard: [][]gotgbot.InlineKeyboardButton{
+			{
+				{
+					Text:         tr(getUserLang(uid), "settings.title"),
+					CallbackData: NewSettingsCallbackData(KindSettings, ActionOpenRoot, "").String(),
 				},
 			},
 		},
@@ -192,6 +423,7 @@ func (c *Client) RunBot(token string, allowedUsers AllowedUsers) {
 		log.Fatal("Cannot initialize the bot:", err.Error())
 	}
 	log.Println("Bot authorized on account.", bot.Username)
+	installCommands(bot)
 	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: func(_ *gotgbot.Bot, _ *ext.Context, err error) ext.DispatcherAction {
 			log.Println("An error occurred while handling update: ", err.Error())
@@ -236,21 +468,28 @@ func (c *Client) handleMessage(bot *gotgbot.Bot, ctx *ext.Context) error {
 	// the userID control.
 	switch ctx.Message.Text {
 	case "/start":
-		_, err := ctx.EffectiveChat.SendMessage(bot, tr(getUserLang(ctx.Message.From.Id), "cmd.start"), nil)
-		return err
-	case "/about":
-		_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(getUserLang(ctx.Message.From.Id), "cmd.about"), common.Version), nil)
+		uid := ctx.Message.From.Id
+		// автодетект языка по первому контакту
+		maybeSetLangFrom(ctx.Message.From.LanguageCode, uid)
+
+		// локализованное приветствие, без кнопки
+		_, err := ctx.EffectiveChat.SendMessage(
+			bot,
+			tr(getUserLang(uid), "cmd.start"),
+			&gotgbot.SendMessageOpts{
+				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{
+					IsDisabled: true,
+				},
+			},
+		)
 		return err
 	case "/help":
 		_, err := ctx.EffectiveChat.SendMessage(bot, tr(getUserLang(ctx.Message.From.Id), "cmd.help"), nil)
 		return err
 	case "/settings":
 		uid := ctx.Message.From.Id
-		mode := getUserMode(uid)
-		title := tr(getUserLang(uid), "settings.title")
-		current := tr(getUserLang(uid), "settings.current_mode")
-		text := title + "\n\n" + fmt.Sprintf(current, mode.String())
-		_, err := ctx.EffectiveChat.SendMessage(bot, text, &gotgbot.SendMessageOpts{
+		modeTitle := tr(getUserLang(uid), "settings.title")
+		_, err := ctx.EffectiveChat.SendMessage(bot, modeTitle, &gotgbot.SendMessageOpts{
 			ParseMode:   gotgbot.ParseModeMarkdownV2,
 			ReplyMarkup: settingsRootKeyboardFor(uid),
 		})
@@ -270,6 +509,12 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		_, err := ctx.EffectiveMessage.Reply(bot, fetchErr.BotError, nil)
 		return err
 	}
+	// link preference
+	uid := ctx.Message.From.Id
+	postUrl := realPostUrl
+	if !getUserAttachLink(uid) {
+		postUrl = ""
+	}
 	// Check the result type
 	toSendText := ""
 	toSendOpt := &gotgbot.SendMessageOpts{
@@ -277,25 +522,75 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 	}
 	switch data := result.(type) {
 	case reddit.FetchResultText:
-		toSendText = addLinkIfNeeded(data.Title+"\n"+data.Text, realPostUrl)
+		toSendText = addLinkIfNeeded(data.Title+"\n"+data.Text, postUrl)
 	case reddit.FetchResultComment:
-		toSendText = addLinkIfNeeded(data.Text, realPostUrl)
+		toSendText = addLinkIfNeeded(data.Text, postUrl)
 	case reddit.FetchResultMedia:
 		if len(data.Medias) == 0 {
 			toSendText = t(ctx.Message.From.Id, "msg.no_media_found")
 			break
+		}
+		// Try auto-select by user quality preference
+		uid := ctx.Message.From.Id
+		if getUserQuality(uid) != QualityAsk && len(data.Medias) > 0 {
+			// pick index by desired quality
+			pickIdx := func() int {
+				// sort by area descending (original first)
+				type pair struct {
+					idx  int
+					area int64
+				}
+				arr := make([]pair, 0, len(data.Medias))
+				for i, m := range data.Medias {
+					area := m.Dim.Width * m.Dim.Height
+					arr = append(arr, pair{i, area})
+				}
+				sort.Slice(arr, func(i, j int) bool { return arr[i].area > arr[j].area })
+				q := getUserQuality(uid)
+				switch q {
+				case QualityOriginal:
+					return arr[0].idx
+				case QualityHigh:
+					if len(arr) >= 3 { // original + high + low (or more)
+						return arr[1].idx
+					}
+					return arr[0].idx // map to original when only original/low
+				case QualityLow:
+					return arr[len(arr)-1].idx
+				default:
+					return -1
+				}
+			}
+			idx := pickIdx()
+			if idx >= 0 {
+				switch data.Type {
+				case reddit.FetchResultMediaTypeGif:
+					return c.handleGifUpload(bot, data.Medias[idx].Link, data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, data.Medias[idx].Dim, ctx.EffectiveChat.Id)
+				case reddit.FetchResultMediaTypeVideo:
+					if _, hasAudio := data.HasAudio(); !hasAudio {
+						return c.handleVideoUpload(bot, data.Medias[idx].Link, "", data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, data.Medias[idx].Dim, data.Duration, ctx.EffectiveChat.Id)
+					}
+					// with audio: pair selected video with audio URL
+					ai, _ := data.HasAudio()
+					audio := data.Medias[ai]
+					return c.handleVideoUpload(bot, data.Medias[idx].Link, audio.Link, data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, data.Medias[idx].Dim, data.Duration, ctx.EffectiveChat.Id)
+				case reddit.FetchResultMediaTypePhoto:
+					// send as photo by default
+					return c.handlePhotoUpload(bot, data.Medias[idx].Link, data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, ctx.EffectiveChat.Id, true)
+				}
+			}
 		}
 		// If there is one media quality, download it
 		// Also allow the user to choose between photo or document in image
 		if len(data.Medias) == 1 && data.Type != reddit.FetchResultMediaTypePhoto {
 			switch data.Type {
 			case reddit.FetchResultMediaTypeGif:
-				return c.handleGifUpload(bot, data.Medias[0].Link, data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), realPostUrl, data.Description, data.Medias[0].Dim, ctx.EffectiveChat.Id)
+				return c.handleGifUpload(bot, data.Medias[0].Link, data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, data.Medias[0].Dim, ctx.EffectiveChat.Id)
 			case reddit.FetchResultMediaTypeVideo:
 				// If the video does have an audio, ask user if they want the audio
 				if _, hasAudio := data.HasAudio(); !hasAudio {
 					// Otherwise, just download the video
-					return c.handleVideoUpload(bot, data.Medias[0].Link, "", data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), realPostUrl, data.Description, data.Medias[0].Dim, data.Duration, ctx.EffectiveChat.Id)
+					return c.handleVideoUpload(bot, data.Medias[0].Link, "", data.Title, data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions), postUrl, data.Description, data.Medias[0].Dim, data.Duration, ctx.EffectiveChat.Id)
 				}
 			default:
 				panic("Shash")
@@ -315,7 +610,7 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		}
 		// Insert the id in cache
 		err := c.CallbackCache.SetMediaCache(idString, cache.CallbackDataCached{
-			PostLink:      realPostUrl,
+			PostLink:      postUrl,
 			Links:         getLinkMapOfFetchResultMediaEntries(data.Medias),
 			Title:         data.Title,
 			ThumbnailLink: data.ThumbnailLinks.SelectThumbnail(maxThumbnailDimensions),
@@ -332,13 +627,13 @@ func (c *Client) fetchPostDetailsAndSend(bot *gotgbot.Bot, ctx *ext.Context) err
 		uid := ctx.Message.From.Id
 		switch getUserMode(uid) {
 		case DownloadModeMedia:
-			return c.handleAlbumUpload(bot, data, realPostUrl, ctx.EffectiveChat.Id, false)
+			return c.handleAlbumUpload(bot, data, postUrl, ctx.EffectiveChat.Id, false)
 		case DownloadModeFiles:
-			return c.handleAlbumUpload(bot, data, realPostUrl, ctx.EffectiveChat.Id, true)
+			return c.handleAlbumUpload(bot, data, postUrl, ctx.EffectiveChat.Id, true)
 		}
 		idString := util.UUIDToBase64(uuid.New())
 		err := c.CallbackCache.SetAlbumCache(idString, cache.CallbackAlbumCached{
-			PostLink: realPostUrl,
+			PostLink: postUrl,
 			Album:    data,
 		})
 		if err != nil {
@@ -406,15 +701,36 @@ func (c *Client) handleCallback(bot *gotgbot.Bot, ctx *ext.Context) error {
 	if err := json.Unmarshal([]byte(ctx.CallbackQuery.Data), &scd); err == nil && scd.Kind == KindSettings {
 		uid := ctx.CallbackQuery.From.Id
 		switch scd.Action {
+		case ActionOpenLink:
+			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.link.caption"), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsLinkKeyboard(uid, getUserAttachLink(uid)),
+			})
+			return err
+		case ActionSetLink:
+			v := strings.ToLower(scd.Value) == "on"
+			setUserAttachLink(uid, v)
+			label := t(uid, "link.off")
+			if v {
+				label = t(uid, "link.on")
+			}
+			_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(getUserLang(uid), "settings.link.saved"), label), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsLinkKeyboard(uid, v),
+			})
+			return err
 		case ActionOpenMode:
 			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.mode.caption"), &gotgbot.SendMessageOpts{
 				ReplyMarkup: settingsModeKeyboard(uid, getUserMode(uid)),
 			})
 			return err
-		case ActionOpenRoot, "back":
+		case ActionOpenRoot:
 			text := tr(getUserLang(uid), "settings.title")
 			_, err := ctx.EffectiveChat.SendMessage(bot, text, &gotgbot.SendMessageOpts{
 				ReplyMarkup: settingsRootKeyboardFor(uid),
+			})
+			return err
+		case "back":
+			_, err := ctx.EffectiveChat.SendMessage(bot, tr(getUserLang(uid), "cmd.start"), &gotgbot.SendMessageOpts{
+				LinkPreviewOptions: &gotgbot.LinkPreviewOptions{IsDisabled: true},
 			})
 			return err
 		case ActionSetMode:
@@ -439,6 +755,18 @@ func (c *Client) handleCallback(bot *gotgbot.Bot, ctx *ext.Context) error {
 			cur := getUserLang(uid)
 			_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(cur, "settings.language.saved"), strings.ToUpper(string(cur))), &gotgbot.SendMessageOpts{
 				ReplyMarkup: settingsLangKeyboard(uid),
+			})
+			return err
+		case ActionOpenQlt:
+			_, err := ctx.EffectiveChat.SendMessage(bot, t(uid, "settings.quality.caption"), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsQualityKeyboard(uid, getUserQuality(uid)),
+			})
+			return err
+		case ActionSetQlt:
+			q := parseMediaQuality(scd.Value)
+			setUserQuality(uid, q)
+			_, err := ctx.EffectiveChat.SendMessage(bot, fmt.Sprintf(tr(getUserLang(uid), "settings.quality.saved"), q.String()), &gotgbot.SendMessageOpts{
+				ReplyMarkup: settingsQualityKeyboard(uid, q),
 			})
 			return err
 		default:
@@ -522,5 +850,28 @@ func NewSettingsCallbackData(kind string, action string, value string) *settings
 		Kind:   kind,
 		Action: action,
 		Value:  value,
+	}
+}
+
+func maybeSetLangFrom(code string, uid int64) {
+	if code == "" {
+		return
+	}
+	lc := strings.ToLower(code)
+	if strings.HasPrefix(lc, "ru") {
+		setUserLang(uid, LangRU)
+	} else {
+		setUserLang(uid, LangEN)
+	}
+}
+
+func langHuman(l Lang) string {
+	switch l {
+	case LangRU:
+		return "Русский"
+	case LangEN:
+		return "English"
+	default:
+		return "English"
 	}
 }
